@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sistema de Linhas Wick</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f3f8;color:#18151f;font-family:Arial,sans-serif}
+header{background:#6f35c8;color:#fff;padding:22px 28px}header h1{margin:0;font-size:23px}main{max-width:1000px;margin:30px auto;padding:0 18px}
+.panel{background:#fff;border-radius:20px;padding:24px;box-shadow:0 10px 35px rgba(0,0,0,.07);margin-bottom:22px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.grid{grid-template-columns:1fr}}
+label{display:block;font-size:13px;font-weight:700;margin:0 0 7px}input{width:100%;padding:13px 14px;border:1px solid #ddd;border-radius:12px;font-size:15px}
+input[type=file]{padding:10px}button{border:0;border-radius:11px;padding:12px 17px;font-weight:700;cursor:pointer}
+.primary{background:#6f35c8;color:white}.secondary{background:#eee}.danger{background:#ffe5e5;color:#b00020}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.hidden{display:none}
+.msg{margin-top:14px;font-size:14px}.list{display:grid;gap:12px}.item{border:1px solid #eee;border-radius:15px;padding:16px;display:flex;align-items:center;justify-content:space-between;gap:15px}
+.meta strong{display:block;margin-bottom:4px}.meta small{color:#777}a{color:#6f35c8;word-break:break-all}
+</style>
+</head>
+<body>
+<header><h1>Sistema de Linhas Wick</h1></header>
+<main>
+<section class="panel" id="authPanel">
+<h2>Acesso administrativo</h2>
+<div class="grid">
+<div><label>E-mail</label><input id="email" type="email" placeholder="seu@email.com"></div>
+<div><label>Senha</label><input id="password" type="password" placeholder="••••••••"></div>
+</div>
+<div class="actions"><button class="primary" onclick="login()">Entrar</button><button class="secondary" onclick="signup()">Criar acesso</button></div>
+<div id="authMsg" class="msg"></div>
+</section>
+
+<section class="panel hidden" id="adminPanel">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+<h2>Nova linha</h2><button class="secondary" onclick="logout()">Sair</button>
+</div>
+<div class="grid">
+<div><label>Nome</label><input id="nome" placeholder="Nome do cliente"></div>
+<div><label>Número da linha</label><input id="numero" placeholder="(62) 99999-9999"></div>
+<div><label>ICCID</label><input id="iccid" placeholder="8955..."></div>
+<div><label>Imagem</label><input id="imagem" type="file" accept="image/*"></div>
+</div>
+<div class="actions"><button class="primary" onclick="saveLine()">Gerar link público</button></div>
+<div id="formMsg" class="msg"></div>
+</section>
+
+<section class="panel hidden" id="listPanel"><h2>Linhas cadastradas</h2><div id="list" class="list"></div></section>
+</main>
+<script>
+const URL="https://kzsfukiozmeooashmqzj.supabase.co", KEY="sb_publishable_SKZUSM8208FK711EcpU1DA_hdjM6rMt";
+let token=null;
+
+async function api(path,opts={}){
+ const headers=Object.assign({apikey:KEY,Authorization:`Bearer ${token||KEY}`},opts.headers||{});
+ if(opts.body && !headers["Content-Type"]) headers["Content-Type"]="application/json";
+ const r=await fetch(URL+path,Object.assign({},opts,{headers}));
+ if(!r.ok) throw new Error(await r.text());
+ return r.status===204?null:r.json();
+}
+function msg(id,t,err=false){const e=document.getElementById(id);e.textContent=t;e.style.color=err?"#c62828":"#555"}
+function slug(){return crypto.randomUUID().replaceAll("-","").slice(0,18)}
+async function login(){
+ try{const r=await fetch(URL+"/auth/v1/token?grant_type=password",{method:"POST",headers:{apikey:KEY,"Content-Type":"application/json"},body:JSON.stringify({email:email.value,password:password.value})});const d=await r.json();if(!r.ok)throw Error(d.msg||d.error_description||"Login inválido");token=d.access_token;showAdmin();loadList()}catch(e){msg("authMsg",e.message,true)}
+}
+async function signup(){
+ try{const r=await fetch(URL+"/auth/v1/signup",{method:"POST",headers:{apikey:KEY,"Content-Type":"application/json"},body:JSON.stringify({email:email.value,password:password.value})});const d=await r.json();if(!r.ok)throw Error(d.msg||"Não foi possível criar o acesso");msg("authMsg","Acesso criado. Se o projeto exigir confirmação de e-mail, confirme e depois entre.")}catch(e){msg("authMsg",e.message,true)}
+}
+function showAdmin(){authPanel.classList.add("hidden");adminPanel.classList.remove("hidden");listPanel.classList.remove("hidden")}
+function logout(){token=null;location.reload()}
+async function saveLine(){
+ try{
+  if(!nome.value||!numero.value||!iccid.value) throw Error("Preencha Nome, Número e ICCID.");
+  const file=imagem.files[0]; if(!file) throw Error("Selecione uma imagem.");
+  const s=slug(), ext=(file.name.split(".").pop()||"jpg").toLowerCase(), path=s+"."+ext;
+  const up=await fetch(URL+"/storage/v1/object/linha-imagens/"+path,{method:"POST",headers:{apikey:KEY,Authorization:`Bearer ${token}`,"Content-Type":file.type||"application/octet-stream","x-upsert":"false"},body:file});
+  if(!up.ok) throw Error(await up.text());
+  const row={slug:s,nome:nome.value.trim(),numero:numero.value.trim(),iccid:iccid.value.trim(),imagem_path:path};
+  await api("/rest/v1/linhas",{method:"POST",body:JSON.stringify(row),headers:{Prefer:"return=minimal"}});
+  const link=location.href.replace(/admin\.html.*$/,"")+"index.html?l="+s;
+  msg("formMsg","Link gerado: "+link);
+  navigator.clipboard?.writeText(link);
+  nome.value=numero.value=iccid.value="";imagem.value="";
+  loadList();
+ }catch(e){msg("formMsg",e.message,true)}
+}
+async function loadList(){
+ try{const rows=await api("/rest/v1/linhas?select=id,nome,numero,slug,created_at&order=created_at.desc");list.innerHTML=rows.length?rows.map(x=>{const link=location.href.replace(/admin\.html.*$/,"")+"index.html?l="+x.slug;return `<div class="item"><div class="meta"><strong>${esc(x.nome)}</strong><small>${esc(x.numero)} · ${new Date(x.created_at).toLocaleString("pt-BR")}</small><br><a href="${link}" target="_blank">${link}</a></div><div class="actions"><button class="secondary" onclick="navigator.clipboard.writeText('${link}')">Copiar</button><button class="danger" onclick="del('${x.id}')">Excluir</button></div></div>`}).join(""):'<div>Nenhuma linha cadastrada.</div>'}catch(e){list.innerHTML="<div>Erro ao carregar.</div>"}
+}
+async function del(id){if(!confirm("Excluir esta linha?"))return;try{await api("/rest/v1/linhas?id=eq."+id,{method:"DELETE"});loadList()}catch(e){alert(e.message)}}
+function esc(v){return String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m])}
+</script>
+</body>
+</html>
